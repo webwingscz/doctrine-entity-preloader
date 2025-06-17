@@ -12,6 +12,7 @@ use ReflectionProperty;
 use function array_chunk;
 use function array_values;
 use function count;
+use function get_class;
 use function get_parent_class;
 use function is_a;
 
@@ -24,10 +25,11 @@ class EntityPreloader
     private const PRELOAD_ENTITY_DEFAULT_BATCH_SIZE = 1_000;
     private const PRELOAD_COLLECTION_DEFAULT_BATCH_SIZE = 100;
 
-    public function __construct(
-        private EntityManagerInterface $entityManager,
-    )
+    private EntityManagerInterface $entityManager;
+
+    public function __construct(EntityManagerInterface $entityManager)
     {
+        $this->entityManager = $entityManager;
     }
 
     /**
@@ -42,7 +44,7 @@ class EntityPreloader
         array $sourceEntities,
         string $sourcePropertyName,
         ?int $batchSize = null,
-        ?int $maxFetchJoinSameFieldCount = null,
+        ?int $maxFetchJoinSameFieldCount = null
     ): array
     {
         $sourceEntitiesCommonAncestor = $this->getCommonAncestor($sourceEntities);
@@ -64,13 +66,30 @@ class EntityPreloader
         $maxFetchJoinSameFieldCount ??= 1;
         $sourceEntities = $this->loadProxies($sourceClassMetadata, $sourceEntities, $batchSize ?? self::PRELOAD_ENTITY_DEFAULT_BATCH_SIZE, $maxFetchJoinSameFieldCount);
 
-        $preloader = match ($associationMapping['type']) {
-            ClassMetadata::ONE_TO_ONE, ClassMetadata::MANY_TO_ONE => $this->preloadToOne(...),
-            ClassMetadata::ONE_TO_MANY, ClassMetadata::MANY_TO_MANY => $this->preloadToMany(...),
-            default => throw new LogicException("Unsupported association mapping type {$associationMapping['type']}"),
-        };
-
-        return $preloader($sourceEntities, $sourceClassMetadata, $sourcePropertyName, $targetClassMetadata, $batchSize, $maxFetchJoinSameFieldCount);
+        switch ($associationMapping['type']) {
+            case ClassMetadata::ONE_TO_ONE:
+            case ClassMetadata::MANY_TO_ONE:
+                return $this->preloadToOne(
+                    $sourceEntities,
+                    $sourceClassMetadata,
+                    $sourcePropertyName,
+                    $targetClassMetadata,
+                    $batchSize,
+                    $maxFetchJoinSameFieldCount,
+                );
+            case ClassMetadata::ONE_TO_MANY:
+            case ClassMetadata::MANY_TO_MANY:
+                return $this->preloadToMany(
+                    $sourceEntities,
+                    $sourceClassMetadata,
+                    $sourcePropertyName,
+                    $targetClassMetadata,
+                    $batchSize,
+                    $maxFetchJoinSameFieldCount,
+                );
+            default:
+                throw new LogicException("Unsupported association mapping type {$associationMapping['type']}");
+        }
     }
 
     /**
@@ -84,7 +103,7 @@ class EntityPreloader
         $commonAncestor = null;
 
         foreach ($entities as $entity) {
-            $entityClassName = $entity::class;
+            $entityClassName = get_class($entity);
 
             if ($commonAncestor === null) {
                 $commonAncestor = $entityClassName;
@@ -117,7 +136,7 @@ class EntityPreloader
         ClassMetadata $classMetadata,
         array $entities,
         int $batchSize,
-        int $maxFetchJoinSameFieldCount,
+        int $maxFetchJoinSameFieldCount
     ): array
     {
         $identifierReflection = $classMetadata->getSingleIdReflectionProperty(); // e.g. Order::$id reflection
@@ -164,7 +183,7 @@ class EntityPreloader
         string $sourcePropertyName,
         ClassMetadata $targetClassMetadata,
         ?int $batchSize,
-        int $maxFetchJoinSameFieldCount,
+        int $maxFetchJoinSameFieldCount
     ): array
     {
         $sourceIdentifierReflection = $sourceClassMetadata->getSingleIdReflectionProperty(); // e.g. Order::$id reflection
@@ -203,24 +222,34 @@ class EntityPreloader
 
         $associationMapping = $sourceClassMetadata->getAssociationMapping($sourcePropertyName);
 
-        $innerLoader = match ($associationMapping['type']) {
-            ClassMetadata::ONE_TO_MANY => $this->preloadOneToManyInner(...),
-            ClassMetadata::MANY_TO_MANY => $this->preloadManyToManyInner(...),
-            default => throw new LogicException('Unsupported association mapping type'),
-        };
-
-        foreach (array_chunk($uninitializedSourceEntityIds, $batchSize, preserve_keys: true) as $uninitializedSourceEntityIdsChunk) {
-            $targetEntitiesChunk = $innerLoader(
-                associationMapping: $associationMapping,
-                sourceClassMetadata: $sourceClassMetadata,
-                sourceIdentifierReflection: $sourceIdentifierReflection,
-                sourcePropertyName: $sourcePropertyName,
-                targetClassMetadata: $targetClassMetadata,
-                targetIdentifierReflection: $targetIdentifierReflection,
-                uninitializedSourceEntityIdsChunk: array_values($uninitializedSourceEntityIdsChunk),
-                uninitializedCollections: $uninitializedCollections,
-                maxFetchJoinSameFieldCount: $maxFetchJoinSameFieldCount,
-            );
+        foreach (array_chunk($uninitializedSourceEntityIds, $batchSize, true) as $uninitializedSourceEntityIdsChunk) {
+            if ($associationMapping['type'] === ClassMetadata::ONE_TO_MANY) {
+                $targetEntitiesChunk = $this->preloadOneToManyInner(
+                    $associationMapping,
+                    $sourceClassMetadata,
+                    $sourceIdentifierReflection,
+                    $sourcePropertyName,
+                    $targetClassMetadata,
+                    $targetIdentifierReflection,
+                    array_values($uninitializedSourceEntityIdsChunk),
+                    $uninitializedCollections,
+                    $maxFetchJoinSameFieldCount,
+                );
+            } elseif ($associationMapping['type'] === ClassMetadata::MANY_TO_MANY) {
+                $targetEntitiesChunk = $this->preloadManyToManyInner(
+                    $associationMapping,
+                    $sourceClassMetadata,
+                    $sourceIdentifierReflection,
+                    $sourcePropertyName,
+                    $targetClassMetadata,
+                    $targetIdentifierReflection,
+                    array_values($uninitializedSourceEntityIdsChunk),
+                    $uninitializedCollections,
+                    $maxFetchJoinSameFieldCount,
+                );
+            } else {
+                throw new LogicException('Unsupported association mapping type');
+            }
 
             foreach ($targetEntitiesChunk as $targetEntityKey => $targetEntity) {
                 $targetEntities[$targetEntityKey] = $targetEntity;
@@ -248,7 +277,7 @@ class EntityPreloader
      * @template T of E
      */
     private function preloadOneToManyInner(
-        array|ArrayAccess $associationMapping,
+        $associationMapping,
         ClassMetadata $sourceClassMetadata,
         ReflectionProperty $sourceIdentifierReflection,
         string $sourcePropertyName,
@@ -256,7 +285,7 @@ class EntityPreloader
         ReflectionProperty $targetIdentifierReflection,
         array $uninitializedSourceEntityIdsChunk,
         array $uninitializedCollections,
-        int $maxFetchJoinSameFieldCount,
+        int $maxFetchJoinSameFieldCount
     ): array
     {
         $targetPropertyName = $sourceClassMetadata->getAssociationMappedByTargetField($sourcePropertyName); // e.g. 'order'
@@ -300,7 +329,7 @@ class EntityPreloader
      * @template T of E
      */
     private function preloadManyToManyInner(
-        array|ArrayAccess $associationMapping,
+        $associationMapping,
         ClassMetadata $sourceClassMetadata,
         ReflectionProperty $sourceIdentifierReflection,
         string $sourcePropertyName,
@@ -308,7 +337,7 @@ class EntityPreloader
         ReflectionProperty $targetIdentifierReflection,
         array $uninitializedSourceEntityIdsChunk,
         array $uninitializedCollections,
-        int $maxFetchJoinSameFieldCount,
+        int $maxFetchJoinSameFieldCount
     ): array
     {
         if (count($associationMapping['orderBy'] ?? []) > 0) {
@@ -376,7 +405,7 @@ class EntityPreloader
         string $sourcePropertyName,
         ClassMetadata $targetClassMetadata,
         ?int $batchSize,
-        int $maxFetchJoinSameFieldCount,
+        int $maxFetchJoinSameFieldCount
     ): array
     {
         $sourcePropertyReflection = $sourceClassMetadata->getReflectionProperty($sourcePropertyName); // e.g. Item::$order reflection
@@ -415,7 +444,7 @@ class EntityPreloader
         string $fieldName,
         array $fieldValues,
         int $maxFetchJoinSameFieldCount,
-        array $orderBy = [],
+        array $orderBy = []
     ): array
     {
         if (count($fieldValues) === 0) {
@@ -450,7 +479,7 @@ class EntityPreloader
         QueryBuilder $queryBuilder,
         ClassMetadata $sourceClassMetadata,
         int $maxFetchJoinSameFieldCount,
-        array $alreadyPreloadedJoins = [],
+        array $alreadyPreloadedJoins = []
     ): void
     {
         $sourceClassName = $sourceClassMetadata->getName();
