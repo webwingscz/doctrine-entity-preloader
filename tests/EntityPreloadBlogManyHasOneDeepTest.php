@@ -17,7 +17,7 @@ class EntityPreloadBlogManyHasOneDeepTest extends TestCase
 
     public function testManyHasOneDeepUnoptimized(): void
     {
-        $this->createDummyBlogData(categoryCount: 5, categoryParentsCount: 5, articleInEachCategoryCount: 5);
+        $this->createDummyBlogData(5, 5, 5);
 
         $articles = $this->getEntityManager()->getRepository(Article::class)->findAll();
 
@@ -31,11 +31,14 @@ class EntityPreloadBlogManyHasOneDeepTest extends TestCase
 
     public function testManyHasOneDeepWithManualPreload(): void
     {
-        $this->createDummyBlogData(categoryCount: 5, categoryParentsCount: 5, articleInEachCategoryCount: 5);
+        $this->createDummyBlogData(5, 5, 5);
 
         $articles = $this->getEntityManager()->getRepository(Article::class)->findAll();
 
-        $categoryIds = array_map(static fn (Article $article) => $article->getCategory()?->getId(), $articles);
+        $categoryIds = array_map(
+            static fn (Article $article) => $article->getCategory() ? $article->getCategory()->getId() : null,
+            $articles,
+        );
         $categoryIds = array_filter($categoryIds, static fn (?int $id) => $id !== null);
 
         if (count($categoryIds) > 0) {
@@ -47,7 +50,10 @@ class EntityPreloadBlogManyHasOneDeepTest extends TestCase
                 ->getQuery()
                 ->getResult();
 
-            $parentCategoryIds = array_map(static fn (Category $category) => $category->getParent()?->getId(), $categories);
+            $parentCategoryIds = array_map(
+                static fn (Category $category) => $category->getParent() ? $category->getParent()->getId() : null,
+                $categories,
+            );
             $parentCategoryIds = array_filter($parentCategoryIds, static fn (?int $id) => $id !== null);
 
             if (count($parentCategoryIds) > 0) {
@@ -71,7 +77,7 @@ class EntityPreloadBlogManyHasOneDeepTest extends TestCase
 
     public function testManyHasOneDeepWithFetchJoin(): void
     {
-        $this->createDummyBlogData(categoryCount: 5, categoryParentsCount: 5, articleInEachCategoryCount: 5);
+        $this->createDummyBlogData(5, 5, 5);
 
         $articles = $this->getEntityManager()->createQueryBuilder()
             ->select('article', 'category', 'parentCategory')
@@ -90,7 +96,7 @@ class EntityPreloadBlogManyHasOneDeepTest extends TestCase
 
     public function testManyHasOneDeepWithEagerFetchMode(): void
     {
-        $this->createDummyBlogData(categoryCount: 5, categoryParentsCount: 5, articleInEachCategoryCount: 5);
+        $this->createDummyBlogData(5, 5, 5);
 
         $articles = $this->getEntityManager()->createQueryBuilder()
             ->select('article')
@@ -111,7 +117,7 @@ class EntityPreloadBlogManyHasOneDeepTest extends TestCase
 
     public function testManyHasOneDeepWithPreload(): void
     {
-        $this->createDummyBlogData(categoryCount: 5, categoryParentsCount: 5, articleInEachCategoryCount: 5);
+        $this->createDummyBlogData(5, 5, 5);
 
         $articles = $this->getEntityManager()->getRepository(Article::class)->findAll();
         $categories = $this->getEntityPreloader()->preload($articles, 'category');
@@ -131,7 +137,9 @@ class EntityPreloadBlogManyHasOneDeepTest extends TestCase
     private function readArticleCategoryParentNames(array $articles): void
     {
         foreach ($articles as $article) {
-            $article->getCategory()?->getParent()?->getName();
+            if ($article->getCategory() && $article->getCategory()->getParent()) {
+                $article->getCategory()->getParent()->getName();
+            }
         }
     }
 

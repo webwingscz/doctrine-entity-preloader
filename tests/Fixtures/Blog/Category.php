@@ -49,7 +49,9 @@ class Category
         $this->children = new ArrayCollection();
         $this->articles = new ArrayCollection();
 
-        $parent?->addChild($this);
+        if ($parent !== null) {
+            $parent->addChild($this);
+        }
     }
 
     public function getId(): int

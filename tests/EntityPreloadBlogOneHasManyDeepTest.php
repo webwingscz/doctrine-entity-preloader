@@ -13,7 +13,7 @@ class EntityPreloadBlogOneHasManyDeepTest extends TestCase
 
     public function testOneHasManyDeepUnoptimized(): void
     {
-        $this->createCategoryTree(depth: 5, branchingFactor: 5);
+        $this->createCategoryTree(5, 5);
 
         $rootCategories = $this->getEntityManager()->createQueryBuilder()
             ->select('category')
@@ -33,7 +33,7 @@ class EntityPreloadBlogOneHasManyDeepTest extends TestCase
     public function testOneHasManyDeepWithWithManualPreloadUsingPartial(): void
     {
         $this->skipIfPartialEntitiesAreNotSupported();
-        $this->createCategoryTree(depth: 5, branchingFactor: 5);
+        $this->createCategoryTree(5, 5);
 
         $rootCategories = $this->getEntityManager()->createQueryBuilder()
             ->select('category')
@@ -72,7 +72,7 @@ class EntityPreloadBlogOneHasManyDeepTest extends TestCase
 
     public function testOneHasManyDeepWithFetchJoin(): void
     {
-        $this->createCategoryTree(depth: 5, branchingFactor: 5);
+        $this->createCategoryTree(5, 5);
 
         $rootCategories = $this->getEntityManager()->createQueryBuilder()
             ->select('category', 'subCategories', 'subSubCategories')
@@ -92,7 +92,7 @@ class EntityPreloadBlogOneHasManyDeepTest extends TestCase
 
     public function testOneHasManyDeepWithEagerFetchMode(): void
     {
-        $this->createCategoryTree(depth: 5, branchingFactor: 5);
+        $this->createCategoryTree(5, 5);
 
         $rootCategories = $this->getEntityManager()->createQueryBuilder()
             ->select('category')
@@ -113,7 +113,7 @@ class EntityPreloadBlogOneHasManyDeepTest extends TestCase
 
     public function testOneHasManyDeepWithPreload(): void
     {
-        $this->createCategoryTree(depth: 5, branchingFactor: 5);
+        $this->createCategoryTree(5, 5);
 
         $rootCategories = $this->getEntityManager()->createQueryBuilder()
             ->select('category')
@@ -137,7 +137,7 @@ class EntityPreloadBlogOneHasManyDeepTest extends TestCase
     private function createCategoryTree(
         int $depth,
         int $branchingFactor,
-        ?Category $parent = null,
+        ?Category $parent = null
     ): void
     {
         for ($i = 0; $i < $branchingFactor; $i++) {

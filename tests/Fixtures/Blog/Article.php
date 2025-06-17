@@ -57,7 +57,9 @@ class Article
         $this->tags = new ArrayCollection();
         $this->comments = new ArrayCollection();
 
-        $category?->addArticle($this);
+        if ($category !== null) {
+            $category->addArticle($this);
+        }
     }
 
     public function getId(): int
